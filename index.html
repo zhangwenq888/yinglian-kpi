@@ -2398,6 +2398,11 @@ function initDetailPage() {
   depts.forEach(function(dept) {
     sel.innerHTML += '<option value="' + esc(dept) + '"' + (dept === currentDept ? ' selected' : '') + '>' + dept + '</option>';
   });
+  // 如果没有选中部门，自动选中第一个（非全部）
+  if (!currentDept && depts.length > 0) {
+    currentDept = depts[0];
+    sel.value = currentDept;
+  }
   if (currentDept) {
     onDetailDeptChange();
   } else {
@@ -2534,6 +2539,10 @@ function renderDetailEdit() {
   var dd = appData.departments[currentDept];
   var kpis = dd.kpis || [];
   var container = document.getElementById('detail-edit');
+  if (kpis.length === 0) {
+    container.innerHTML = '<div class="card"><div class="card-title">录入绩效实绩 · ' + currentDept + '</div><div class="empty-state">该部门暂无绩效指标，请先在「指标管理」中添加指标</div></div>';
+    return;
+  }
   var html = '<div class="card"><div class="card-title">录入绩效实绩 · ' + currentDept + '</div>';
   html += '<div style="overflow-x:auto;">';
   html += '<table class="kpi-table" style="font-size:12px;table-layout:fixed;width:100%;">';
