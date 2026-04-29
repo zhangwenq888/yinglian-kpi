@@ -453,10 +453,10 @@ function formatWeight(w) {
   var s = String(w).trim();
   // 已经带%（全角或半角），原样返回
   if (/%|％/.test(s)) return s;
-  // 纯数字，直接补%
+  // 纯数字，直接补%（保留原始小数位）
   var num = parseFloat(s);
   if (!isNaN(num) && String(num) === s) {
-    return num.toFixed(0) + '%';
+    return num + '%';
   }
   return s; // 文字/中文原样返回
 }
@@ -467,10 +467,10 @@ function normalizeWeight(w) {
   var s = String(w).trim();
   // 已经带%的，原样返回
   if (/%|％/.test(s)) return s;
-  // 纯数字（包括小数），自动加%
+  // 纯数字（包括小数），自动加%（保留原始小数位）
   var num = parseFloat(s);
   if (!isNaN(num) && String(num) === s) {
-    return num.toFixed(0) + '%';
+    return num + '%';
   }
   // 其他（汉字、混合等），原样返回
   return s;
