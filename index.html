@@ -447,13 +447,16 @@ select.year-select{
 <script>
 // ===== XLSX 工具函数 =====
 
-// 权重格式化展示：支持数字（0.3→30%）、文字（"30%"→30%）、中文（"同等重要"→原样）
+// 权重格式化展示：带%直接原样显示，纯数字自动补%，中文原样返回
 function formatWeight(w) {
   if (w === null || w === undefined || w === '') return '—';
   var s = String(w).trim();
-  var num = parseFloat(s.replace(/[%％]/g, ''));
-  if (!isNaN(num) && String(num) === s.replace(/[%％]/g, '')) {
-    return (num > 1 ? num : num * 100).toFixed(0) + '%';
+  // 已经带%（全角或半角），原样返回
+  if (/%|％/.test(s)) return s;
+  // 纯数字，直接补%
+  var num = parseFloat(s);
+  if (!isNaN(num) && String(num) === s) {
+    return num.toFixed(0) + '%';
   }
   return s; // 文字/中文原样返回
 }
@@ -467,7 +470,7 @@ function normalizeWeight(w) {
   // 纯数字（包括小数），自动加%
   var num = parseFloat(s);
   if (!isNaN(num) && String(num) === s) {
-    return (num > 1 ? num : num * 100).toFixed(0) + '%';
+    return num.toFixed(0) + '%';
   }
   // 其他（汉字、混合等），原样返回
   return s;
@@ -477,9 +480,13 @@ function normalizeWeight(w) {
 function getNumericWeight(w) {
   if (w === null || w === undefined || w === '') return null;
   var s = String(w).trim();
+  var hasPercent = /%|％/.test(s);
   var num = parseFloat(s.replace(/[%％]/g, ''));
   if (isNaN(num) || num < 0) return null;
-  return num > 1 ? num / 100 : num;
+  // 带%符号：30% → 0.30，1% → 0.01
+  if (hasPercent) return num / 100;
+  // 纯数字：30 → 0.30，1 → 0.01（认为用户输入的是百分比数值）
+  return num / 100;
 }
 
 // 将xlsx文件解析为二维字符串数组（跳过空行，与CSV解析结果格式一致）
