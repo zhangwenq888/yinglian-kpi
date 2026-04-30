@@ -1853,16 +1853,66 @@ var CloudSync = (function() {
       if (hasUpdate) {
         console.log('[CloudSync] 云端数据有更新，刷新页面显示');
         updateSyncUI('ok', '检测到云端更新，已自动同步');
-        // 重新加载数据并刷新UI
-        if (typeof _doInitApp === 'function') _doInitApp();
+        // 把合并后的数据更新到 appData（不调用_doInitApp，避免丢失当前编辑状态）
+        try {
+          var perfKey = 'yl_perf_' + currentBase + '_' + currentYear + '_v4';
+          var savedPerf = localStorage.getItem(perfKey);
+          if (savedPerf) {
+            var savedData = JSON.parse(savedPerf);
+            // 只更新appData中本地没有的部门数据，以及补充本地没有的月份实绩
+            var savedDepts = savedData.departments || {};
+            Object.keys(savedDepts).forEach(function(dept) {
+              if (!appData.departments[dept]) {
+                // 本地没有这个部门，直接加入
+                appData.departments[dept] = savedDepts[dept];
+              } else {
+                // 本地有这个部门，逐KPI补充本地没有的月份实绩
+                var localKpis = appData.departments[dept].kpis || [];
+                var savedKpis = savedDepts[dept].kpis || [];
+                savedKpis.forEach(function(savedKpi) {
+                  var localKpi = localKpis.find(function(k) { return k.name === savedKpi.name; });
+                  if (!localKpi) return; // 本地没有这个KPI，忽略（避免打乱顺序）
+                  // 补充本地没有的月份实绩
+                  if (savedKpi.perfs) {
+                    if (!localKpi.perfs) localKpi.perfs = {};
+                    Object.keys(savedKpi.perfs).forEach(function(month) {
+                      if (!localKpi.perfs[month]) {
+                        localKpi.perfs[month] = savedKpi.perfs[month];
+                      }
+                    });
+                  }
+                  // 补充本地没有的月份得分
+                  if (savedKpi.scores) {
+                    if (!localKpi.scores) localKpi.scores = {};
+                    Object.keys(savedKpi.scores).forEach(function(month) {
+                      if (!localKpi.scores[month]) {
+                        localKpi.scores[month] = savedKpi.scores[month];
+                      }
+                    });
+                  }
+                });
+              }
+            });
+            // 更新 lastModified
+            if (savedData.lastModified) appData.lastModified = savedData.lastModified;
+          }
+          // 收集表数据直接替换（收集表不会和当前编辑冲突）
+          var collectKey = 'yl_collect_' + currentBase + '_' + currentYear + '_v4';
+          var savedCollect = localStorage.getItem(collectKey);
+          if (savedCollect) {
+            var collectData = JSON.parse(savedCollect);
+            Object.keys(collectData).forEach(function(key) {
+              EMBEDDED_COLLECT[key] = collectData[key];
+            });
+          }
+        } catch(e) { console.warn('[CloudSync] 更新appData失败:', e); }
+        // 只刷新总览和收集表UI（不刷新部门详情，避免丢失当前编辑）
         if (typeof renderOverview === 'function') renderOverview();
         if (typeof renderCollectChips === 'function') renderCollectChips();
-        // 如果当前在查看某个部门详情，也刷新
-        if (typeof renderDeptDetail === 'function' && currentDept) renderDeptDetail(currentDept);
         // 合并后有新数据，需要推送到云端确保云端也有完整数据
-        if (typeof CloudSync !== 'undefined') {
-          setTimeout(function() { CloudSync.pushAll(); }, 2000);
-        }
+        setTimeout(function() {
+          if (typeof CloudSync !== 'undefined') CloudSync.pushAll();
+        }, 3000);
       } else {
         // 无更新，静默
         lastCloudTime = new Date().toISOString();
@@ -2450,7 +2500,7 @@ function renderAdminCloudSync() {
   html += '<div style="margin-top:20px;background:#eff6ff;border-radius:10px;padding:16px;">';
   html += '<div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:8px;">📌 工作原理</div>';
   html += '<ul style="font-size:12px;color:#475569;padding-left:20px;line-height:1.8;">';
-  html += '<li>每次保存数据时，系统会在 <b>10秒后</b> 自动同步到 GitHub 云端</li>';
+  html += '<li>每次保存数据时，系统会在 <b>2秒后</b> 自动同步到 GitHub 云端</li>';
   html += '<li>每次打开系统时，会自动从云端拉取最新数据</li>';
   html += '<li>系统每 <b>20秒</b> 自动从云端检查更新，多人协作无需手动刷新</li>';
   html += '<li>多人同时操作时，<b>后保存的数据会覆盖先保存的</b></li>';
@@ -2985,13 +3035,15 @@ function saveToLocal() {
     localStorage.setItem(collectKey, JSON.stringify(EMBEDDED_COLLECT));
     // 保存KPI_DEFINITION_DATA的修改
     localStorage.setItem(kpiDefKey, JSON.stringify(KPI_DEFINITION_DATA));
-    // 云端同步（延迟推送，避免频繁请求）
+    // 云端同步（保存后立即推送，确保数据不丢失）
     if (typeof CloudSync !== 'undefined') {
-      CloudSync.updateSyncUI('idle', '数据已保存本地');
+      CloudSync.updateSyncUI('idle', '数据已保存本地，正在同步到云端...');
+      // 清除之前的防抖计时器
       if (window._cloudSyncTimer) clearTimeout(window._cloudSyncTimer);
+      // 立即推送到云端（不再延迟10秒，防止被自动拉取覆盖）
       window._cloudSyncTimer = setTimeout(function() {
         CloudSync.pushAll();
-      }, 10000); // 10秒后自动同步到云端（防抖，避免高频推送）
+      }, 2000); // 2秒后推送（短防抖，避免连续保存时重复推送）
     }
   } catch(e) { console.warn('save error:', e); }
 }
