@@ -1,1 +1,1 @@
-[{"username": "admin", "password": "admin123", "role": "admin", "displayName": "HRBP管理员", "dept": "", "base": "扬州基地"}]
+{"_test":true,"time":"2026-04-30T10:25:00Z","note":"push test from Python"}
