@@ -3035,23 +3035,32 @@ function saveToLocal() {
     localStorage.setItem(collectKey, JSON.stringify(EMBEDDED_COLLECT));
     // 保存KPI_DEFINITION_DATA的修改
     localStorage.setItem(kpiDefKey, JSON.stringify(KPI_DEFINITION_DATA));
-    // 云端同步（保存后立即推送，确保数据不丢失）
+    // 只保存到localStorage，不自动推送到云端（手动点"保存"按钮才推送）
     if (typeof CloudSync !== 'undefined') {
-      CloudSync.updateSyncUI('idle', '数据已保存本地，正在同步到云端...');
-      // 清除之前的防抖计时器
-      if (window._cloudSyncTimer) clearTimeout(window._cloudSyncTimer);
-      // 立即推送到云端（不再延迟10秒，防止被自动拉取覆盖）
-      window._cloudSyncTimer = setTimeout(function() {
-        CloudSync.pushAll();
-      }, 2000); // 2秒后推送（短防抖，避免连续保存时重复推送）
+      CloudSync.updateSyncUI('idle', '数据已保存本地');
     }
   } catch(e) { console.warn('save error:', e); }
+}
+
+// ===== 保存并推送到云端（用户手动点击"保存"时调用） =====
+function saveAndPush() {
+  saveToLocal();
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.updateSyncUI('syncing', '正在保存到云端...');
+    CloudSync.pushAll().then(function() {
+      CloudSync.updateSyncUI('ok', '✅ 数据已保存并同步到云端');
+    });
+  }
 }
 
 // ===== 页面关闭/切换自动保存 =====
 window.addEventListener('beforeunload', function() {
   syncDetailEditToData();
   saveToLocal();
+  // 页面关闭时也推送到云端
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.pushAll();
+  }
 });
 
 // 每30秒自动保存一次（防止意外丢失）
@@ -3882,6 +3891,13 @@ function saveAllEditData() {
     by: '系统管理员'
   });
   saveToLocal();
+  // 立即推送到云端
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.updateSyncUI('syncing', '正在保存到云端...');
+    CloudSync.pushAll().then(function() {
+      CloudSync.updateSyncUI('ok', '✅ 数据已保存并同步到云端');
+    });
+  }
   alert('✅ 全部数据已保存！');
   renderDetailData();
   renderOverview();
@@ -4031,6 +4047,13 @@ function submitCollectAll() {
     }
   });
   saveToLocal();
+  // 立即推送到云端
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.updateSyncUI('syncing', '正在保存到云端...');
+    CloudSync.pushAll().then(function() {
+      CloudSync.updateSyncUI('ok', '✅ 数据已保存并同步到云端');
+    });
+  }
   if (updated.length > 0) {
     alert('✅ 数据已保存！共同步 ' + updated.length + ' 项到部门绩效。');
   } else {
@@ -4085,7 +4108,7 @@ function submitCollect(month, kpiCount) {
     synced: updated.join(', '),
     by: '系统管理员'
   });
-  saveToLocal();
+  saveAndPush();
   alert('✅ ' + month + '月数据已提交！已写入 ' + updated.length + ' 项部门绩效。');
   renderVersionHistory();
   renderOverview();
@@ -4467,7 +4490,7 @@ function editKpi(dept, idx) {
 function deleteKpi(dept, idx) {
   if (!confirm('确定要删除该指标吗？此操作不可恢复。')) return;
   appData.departments[dept].kpis.splice(idx, 1);
-  saveToLocal();
+  saveAndPush();
   renderManageList();
   renderOverview();
   alert('✅ 指标已删除');
@@ -4479,7 +4502,7 @@ function moveKpi(dept, idx, direction) {
   if (targetIdx < 0 || targetIdx >= kpis.length || targetIdx === idx) return;
   var item = kpis.splice(idx, 1)[0];
   kpis.splice(targetIdx, 0, item);
-  saveToLocal();
+  saveAndPush();
   renderManageList();
   renderOverview();
 }
@@ -4521,7 +4544,7 @@ function saveKpi() {
     appData.departments[dept].kpis.push(kpiData);
   }
 
-  saveToLocal();
+  saveAndPush();
   currentManageDept = null;
   currentManageKpiIdx = null;
   switchManageTab('list');
@@ -4577,7 +4600,7 @@ function showAddDeptDialog() {
     monthly_totals: {}
   };
   
-  saveToLocal();
+  saveAndPush();
   renderManageDept();
   // 刷新总览
   selectedDepts = Object.keys(appData.departments).sort();
@@ -4633,7 +4656,7 @@ function showRenameDeptDialog(oldName) {
     }
   }
   
-  saveToLocal();
+  saveAndPush();
   renderManageDept();
   renderOverview();
   // 刷新指标定义面板
@@ -4654,7 +4677,7 @@ function deleteDept(dept) {
     selectedDepts.splice(idx, 1);
   }
   
-  saveToLocal();
+  saveAndPush();
   renderManageDept();
   renderOverview();
   alert('✅ 部门 "' + dept + '" 已删除');
@@ -4815,7 +4838,7 @@ function doRenameCollectSheet(key) {
   var oldName = EMBEDDED_COLLECT[key].sheet;
   EMBEDDED_COLLECT[key].sheet = newName;
 
-  saveToLocal();
+  saveAndPush();
   renderCollectDeptManage();
   renderCollectChips();
   alert('✅ 收集表已更名为 "' + newName + '"');
@@ -4829,7 +4852,7 @@ function deleteCollectSheet(key) {
 
   delete EMBEDDED_COLLECT[key];
 
-  saveToLocal();
+  saveAndPush();
   renderCollectDeptManage();
   renderCollectChips();
   alert('✅ 收集表 "' + sheetName + '" 已删除');
@@ -4846,7 +4869,7 @@ function addCollectSheet() {
   }
   EMBEDDED_COLLECT[key] = { sheet: name, kpis: [] };
   renderCollectManage();
-  saveToLocal();
+  saveAndPush();
   alert('✅ 收集表已创建');
 }
 
@@ -4874,7 +4897,7 @@ function deleteCollectKpi(key, idx) {
   if (!confirm('确定要删除该指标吗？')) return;
   EMBEDDED_COLLECT[key].kpis.splice(idx, 1);
   renderCollectManage();
-  saveToLocal();
+  saveAndPush();
   alert('✅ 指标已删除');
 }
 
@@ -4884,7 +4907,7 @@ function moveCollectKpi(key, idx, direction) {
   if (targetIdx < 0 || targetIdx >= kpis.length || targetIdx === idx) return;
   var item = kpis.splice(idx, 1)[0];
   kpis.splice(targetIdx, 0, item);
-  saveToLocal();
+  saveAndPush();
   renderCollectManage();
 }
 
@@ -4950,7 +4973,7 @@ function saveCollectKpi() {
     EMBEDDED_COLLECT[currentManageCollectKey].kpis.push(kpiData);
   }
 
-  saveToLocal();
+  saveAndPush();
   currentManageCollectKey = null;
   currentManageCollectKpiIdx = null;
   renderCollectManage();
@@ -5359,7 +5382,7 @@ function addKpiDefDept() {
     appData.departments[name] = { kpis: [], monthly_totals: {} };
     selectedDepts.push(name);
     selectedDepts.sort();
-    saveToLocal();
+    saveAndPush();
   }
   if (input) input.value = '';
   renderKpiDefDeptList();
@@ -5413,7 +5436,7 @@ function renameKpiDefDept(idx, newName) {
   
   depts[idx] = newName;
   saveKpiDefDepts(depts);
-  saveToLocal();
+  saveAndPush();
   initKpiDefDeptSelect();
   // 选中重命名后的部门
   var sel = document.getElementById('kpi-def-dept-select');
@@ -5480,7 +5503,7 @@ function insertKpiDefRow(ri, pos) {
   data.rows.splice(idx, 0, emptyRow);
   syncKpiDefFromDom();
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 function copyKpiDefRow(ri) {
@@ -5493,7 +5516,7 @@ function copyKpiDefRow(ri) {
   data.rows.splice(ri + 1, 0, copy);
   syncKpiDefFromDom();
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 function deleteKpiDefRowAt(ri) {
@@ -5504,7 +5527,7 @@ function deleteKpiDefRowAt(ri) {
   data.rows.splice(ri, 1);
   syncKpiDefFromDom();
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 // 从DOM同步当前编辑内容到数据（防止渲染丢失未保存编辑）
@@ -5555,7 +5578,7 @@ function addKpiDefRow() {
   data.headers.forEach(function(h) { emptyRow[h] = ''; });
   data.rows.push(emptyRow);
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
   // 滚动到底部
   setTimeout(function() {
     var t = document.getElementById('kpi-def-table');
@@ -5569,7 +5592,7 @@ function deleteKpiDefRow() {
   if (!confirm('确认删除最后一行？')) return;
   data.rows.pop();
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 function addKpiDefCol() {
@@ -5582,7 +5605,7 @@ function addKpiDefCol() {
   data.headers.push(colName);
   data.rows.forEach(function(row) { row[colName] = ''; });
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 function deleteKpiDefCol() {
@@ -5593,7 +5616,7 @@ function deleteKpiDefCol() {
   data.headers.pop();
   data.rows.forEach(function(row) { delete row[lastCol]; });
   renderKpiDefinition();
-  saveToLocal();
+  saveAndPush();
 }
 
 
@@ -5625,7 +5648,7 @@ function importKpiDefTable() {
         KPI_DEFINITION_DATA[dept].headers = headers;
         KPI_DEFINITION_DATA[dept].rows = rows;
         renderKpiDefinition();
-        saveToLocal();
+        saveAndPush();
         alert('导入成功！共 ' + rows.length + ' 行');
       } catch(err) {
         alert('导入失败：' + err.message);
