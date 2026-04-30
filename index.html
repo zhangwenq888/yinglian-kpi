@@ -209,6 +209,7 @@ select.year-select{
       <div class="admin-user-badge">
         <span id="user-display-name">管理员</span>
         <span id="user-role-tag" class="role-tag role-admin">管理员</span>
+        <span id="user-base-tag" class="role-tag" style="background:#fef3c7;color:#92400e;">扬州基地</span>
       </div>
       <button class="btn" style="padding:6px 14px;font-size:12px;background:#fee2e2;color:#991b1b;" onclick="doLogout()">退出登录</button>
     </div>
@@ -1591,6 +1592,9 @@ function showMainApp() {
     roleTag.textContent = currentUser.dept;
     roleTag.className = 'role-tag role-dept';
   }
+  // 更新基地标签
+  var baseTag = document.getElementById('user-base-tag');
+  if (baseTag) baseTag.textContent = currentBase;
   document.getElementById('admin-user-name').textContent = currentUser.displayName;
   document.getElementById('admin-role-tag').textContent = currentUser.role === 'admin' ? '管理员' : currentUser.dept;
   document.getElementById('admin-role-tag').className = 'role-tag ' + (currentUser.role === 'admin' ? 'role-admin' : 'role-dept');
