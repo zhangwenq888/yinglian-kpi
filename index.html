@@ -1749,6 +1749,38 @@ var CloudSync = (function() {
     });
   }
 
+  // 定时自动拉取云端数据（多人协作时自动同步）
+  var _autoPullTimer = null;
+  var AUTO_PULL_INTERVAL = 60000; // 每60秒自动拉取一次
+
+  function startAutoPull() {
+    stopAutoPull();
+    _autoPullTimer = setInterval(function() {
+      // 如果正在同步中，跳过本次
+      if (isSyncing) return;
+      // 如果页面不可见（切到其他标签页），跳过本次
+      if (document.hidden) return;
+      console.log('[CloudSync] 定时自动拉取云端数据...');
+      pullAll().then(function(updated) {
+        if (updated) {
+          console.log('[CloudSync] 检测到云端数据更新，刷新页面');
+          // 重新加载数据并刷新UI
+          if (typeof _doInitApp === 'function') _doInitApp();
+          if (typeof renderOverview === 'function') renderOverview();
+          if (typeof renderCollectChips === 'function') renderCollectChips();
+        }
+      });
+    }, AUTO_PULL_INTERVAL);
+    console.log('[CloudSync] 已启动自动同步（每' + (AUTO_PULL_INTERVAL/1000) + '秒）');
+  }
+
+  function stopAutoPull() {
+    if (_autoPullTimer) {
+      clearInterval(_autoPullTimer);
+      _autoPullTimer = null;
+    }
+  }
+
   return {
     pullAll: pullAll,
     pullUsers: pullUsers,
@@ -1756,7 +1788,9 @@ var CloudSync = (function() {
     pushUsers: pushUsers,
     injectUI: injectUI,
     updateSyncUI: updateSyncUI,
-    isSyncing: function() { return isSyncing; }
+    isSyncing: function() { return isSyncing; },
+    startAutoPull: startAutoPull,
+    stopAutoPull: stopAutoPull
   };
 })();
 
@@ -2270,8 +2304,9 @@ function renderAdminCloudSync() {
   html += '<div style="margin-top:20px;background:#eff6ff;border-radius:10px;padding:16px;">';
   html += '<div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:8px;">📌 工作原理</div>';
   html += '<ul style="font-size:12px;color:#475569;padding-left:20px;line-height:1.8;">';
-  html += '<li>每次保存数据时，系统会在 <b>3秒后</b> 自动同步到 GitHub 云端</li>';
+  html += '<li>每次保存数据时，系统会在 <b>30秒后</b> 自动同步到 GitHub 云端</li>';
   html += '<li>每次打开系统时，会自动从云端拉取最新数据</li>';
+  html += '<li>系统每 <b>60秒</b> 自动从云端检查更新，多人协作无需手动刷新</li>';
   html += '<li>多人同时操作时，<b>后保存的数据会覆盖先保存的</b></li>';
   html += '<li>如果多人同时编辑同一部门，请注意协调避免数据冲突</li>';
   html += '<li>如遇同步异常，可手动点击上方按钮强制同步</li>';
@@ -2662,10 +2697,14 @@ function initApp() {
         CloudSync.updateSyncUI('idle', '使用本地缓存数据');
       }
       _doInitApp();
+      // 启动定时自动拉取（多人协作时自动同步）
+      CloudSync.startAutoPull();
     }).catch(function(e) {
       console.warn('[initApp] 云端同步失败，使用本地数据:', e);
       CloudSync.updateSyncUI('error', '云端同步失败，使用本地数据');
       _doInitApp();
+      // 即使首次拉取失败，也启动自动拉取
+      CloudSync.startAutoPull();
     });
   } else {
     _doInitApp();
