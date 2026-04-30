@@ -1590,6 +1590,11 @@ var CloudSync = (function() {
       var promises = keys.map(function(item) {
         return read(item.key).then(function(result) {
           if (result && result.data) {
+            // users 数据必须是数组，否则拒绝写入
+            if (item.key === 'users' && !Array.isArray(result.data)) {
+              console.warn('[CloudSync] 云端users数据格式错误（非数组），已跳过');
+              return false;
+            }
             localStorage.setItem(item.localKey, JSON.stringify(result.data));
             return true;
           }
@@ -1671,6 +1676,17 @@ var CloudSync = (function() {
     if (isSyncing) { pendingSync = true; return; }
     var users = localStorage.getItem('yl_system_users');
     if (!users) return;
+    // 校验：users 必须是数组，否则拒绝推送
+    try {
+      var parsed = JSON.parse(users);
+      if (!Array.isArray(parsed)) {
+        console.warn('[CloudSync] 本地users数据格式错误（非数组），拒绝推送');
+        return;
+      }
+    } catch(e) {
+      console.warn('[CloudSync] 本地users数据解析失败，拒绝推送');
+      return;
+    }
     ensureDir().then(function() {
       return read('users').then(function(result) {
         var sha = result ? result.sha : null;
@@ -1739,7 +1755,16 @@ function getDefaultUsers() {
 
 function getUsers() {
   var saved = localStorage.getItem('yl_system_users');
-  if (saved) return JSON.parse(saved);
+  if (saved) {
+    try {
+      var parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+      // 数据格式错误（非数组），自动修复
+      console.warn('[getUsers] localStorage数据格式错误，已自动修复');
+    } catch(e) {
+      console.warn('[getUsers] localStorage数据解析失败，已自动修复');
+    }
+  }
   var defaults = getDefaultUsers();
   localStorage.setItem('yl_system_users', JSON.stringify(defaults));
   return defaults;
