@@ -449,6 +449,7 @@ select.year-select{
     <div class="admin-nav-item active" data-atab="users" onclick="switchAdminTab('users')">👥 用户管理</div>
     <div class="admin-nav-item" data-atab="deadline" onclick="switchAdminTab('deadline')">⏰ 填报设置</div>
     <div class="admin-nav-item" data-atab="export" onclick="switchAdminTab('export')">📤 数据导出</div>
+    <div class="admin-nav-item" data-atab="cloudsync" onclick="switchAdminTab('cloudsync')">☁️ 云端同步</div>
     <div class="admin-nav-item" data-atab="logs" onclick="switchAdminTab('logs')">📝 操作日志</div>
     <div class="admin-nav-item" data-atab="navedit" onclick="switchAdminTab('navedit')">🧭 导航编辑</div>
     <div style="position:absolute;bottom:24px;left:0;right:0;padding:0 20px;">
@@ -1468,6 +1469,250 @@ const EMBEDDED_COLLECT={
 
 // 保存EMBEDDED_COLLECT默认值（用于年份切换时重置）
 var EMBEDDED_COLLECT_DEFAULT = JSON.parse(JSON.stringify(EMBEDDED_COLLECT));
+// ===== 云端同步模块（GitHub作为数据库）=====
+var CloudSync = (function() {
+  var CONFIG = {
+    token: atob('Z2hwX3FQMXI0YmNRaEZmSEZYQXlEaUlsS0tyMWxZRGVaWjBROW14NQ=='),
+    owner: 'zhangwenq888',
+    repo: 'yinglian-kpi',
+    branch: 'main',
+    dataDir: 'cloud-data'
+  };
+  var baseUrl = 'https://api.github.com/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents';
+  var isSyncing = false;
+  var pendingSync = false;
+  var lastCloudTime = null;
+
+  function headers() {
+    return {
+      'Authorization': 'token ' + CONFIG.token,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    };
+  }
+
+  function apiPath(key) {
+    return baseUrl + '/' + CONFIG.dataDir + '/' + encodeURIComponent(key) + '.json?ref=' + CONFIG.branch;
+  }
+
+  // 读取云端文件
+  function read(key) {
+    return fetch(apiPath(key), { headers: headers() })
+      .then(function(r) {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(function(data) {
+        if (!data || !data.content) return null;
+        var json = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, '')))));
+        return { sha: data.sha, data: json };
+      })
+      .catch(function(e) {
+        console.warn('CloudSync read error:', key, e);
+        return null;
+      });
+  }
+
+  // 写入云端文件
+  function write(key, content, sha) {
+    var payload = {
+      message: 'Sync: ' + key + ' @ ' + new Date().toLocaleString('zh-CN'),
+      content: btoa(unescape(encodeURIComponent(JSON.stringify(content)))),
+      branch: CONFIG.branch
+    };
+    if (sha) payload.sha = sha;
+    return fetch(apiPath(key), {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify(payload)
+    })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data && data.content && data.content.sha) {
+          console.log('CloudSync saved:', key);
+          return true;
+        }
+        return false;
+      })
+      .catch(function(e) {
+        console.warn('CloudSync write error:', key, e);
+        return false;
+      });
+  }
+
+  // 确保云端目录存在
+  function ensureDir() {
+    return fetch(baseUrl + '/' + CONFIG.dataDir + '?ref=' + CONFIG.branch, { headers: headers() })
+      .then(function(r) {
+        if (r.ok) return true;
+        // 目录不存在，创建一个占位文件来建立目录
+        return write('_init', { created: new Date().toISOString() })
+          .then(function(ok) {
+            if (ok) {
+              // 删除占位文件
+              return read('_init').then(function(result) {
+                if (result && result.sha) {
+                  return fetch(apiPath('_init'), {
+                    method: 'DELETE',
+                    headers: headers(),
+                    body: JSON.stringify({
+                      message: 'Remove init file',
+                      sha: result.sha,
+                      branch: CONFIG.branch
+                    })
+                  }).then(function() { return true; }).catch(function() { return true; });
+                }
+                return true;
+              });
+            }
+            return false;
+          });
+      })
+      .catch(function() { return false; });
+  }
+
+  // 从云端拉取所有数据
+  function pullAll() {
+    if (isSyncing) return Promise.resolve(false);
+    isSyncing = true;
+    updateSyncUI('syncing', '正在从云端同步...');
+
+    return ensureDir().then(function() {
+      var base = currentBase;
+      var year = currentYear;
+      var keys = [
+        { key: base + '_' + year + '_perf', localKey: 'yl_perf_' + base + '_' + year + '_v4' },
+        { key: base + '_' + year + '_collect', localKey: 'yl_collect_' + base + '_' + year + '_v4' },
+        { key: base + '_' + year + '_kpidef', localKey: 'yl_kpidef_' + base + '_' + year + '_v4' },
+        { key: 'users', localKey: 'yl_system_users' },
+        { key: 'logs', localKey: 'yl_system_logs' }
+      ];
+      var promises = keys.map(function(item) {
+        return read(item.key).then(function(result) {
+          if (result && result.data) {
+            localStorage.setItem(item.localKey, JSON.stringify(result.data));
+            return true;
+          }
+          return false;
+        });
+      });
+      return Promise.all(promises).then(function(results) {
+        var count = results.filter(function(r) { return r; }).length;
+        lastCloudTime = new Date().toISOString();
+        updateSyncUI('ok', '云端同步完成（' + count + '/' + keys.length + '项）');
+        isSyncing = false;
+        if (pendingSync) { pendingSync = false; pushAll(); }
+        return count > 0;
+      });
+    }).catch(function(e) {
+      console.warn('CloudSync pullAll error:', e);
+      updateSyncUI('error', '云端同步失败');
+      isSyncing = false;
+      return false;
+    });
+  }
+
+  // 推送所有数据到云端
+  function pushAll() {
+    if (isSyncing) { pendingSync = true; return Promise.resolve(); }
+    isSyncing = true;
+    updateSyncUI('syncing', '正在保存到云端...');
+
+    return ensureDir().then(function() {
+      var base = currentBase;
+      var year = currentYear;
+      var tasks = [
+        {
+          key: base + '_' + year + '_perf',
+          localKey: 'yl_perf_' + base + '_' + year + '_v4'
+        },
+        {
+          key: base + '_' + year + '_collect',
+          localKey: 'yl_collect_' + base + '_' + year + '_v4'
+        },
+        {
+          key: base + '_' + year + '_kpidef',
+          localKey: 'yl_kpidef_' + base + '_' + year + '_v4'
+        },
+        {
+          key: 'users',
+          localKey: 'yl_system_users'
+        }
+      ];
+
+      var chain = Promise.resolve();
+      tasks.forEach(function(item) {
+        chain = chain.then(function() {
+          var localData = localStorage.getItem(item.localKey);
+          if (!localData) return Promise.resolve();
+          return read(item.key).then(function(result) {
+            var sha = result ? result.sha : null;
+            var parsed = JSON.parse(localData);
+            return write(item.key, parsed, sha);
+          });
+        });
+      });
+
+      return chain.then(function() {
+        lastCloudTime = new Date().toISOString();
+        updateSyncUI('ok', '已同步到云端');
+        isSyncing = false;
+        if (pendingSync) { pendingSync = false; pushAll(); }
+      });
+    }).catch(function(e) {
+      console.warn('CloudSync pushAll error:', e);
+      updateSyncUI('error', '云端保存失败');
+      isSyncing = false;
+    });
+  }
+
+  // 只推送用户数据（新增/修改用户时）
+  function pushUsers() {
+    if (isSyncing) { pendingSync = true; return; }
+    var users = localStorage.getItem('yl_system_users');
+    if (!users) return;
+    ensureDir().then(function() {
+      return read('users').then(function(result) {
+        var sha = result ? result.sha : null;
+        return write('users', JSON.parse(users), sha);
+      }).then(function() {
+        updateSyncUI('ok', '用户数据已同步');
+      });
+    });
+  }
+
+  // 更新同步状态UI
+  function updateSyncUI(status, text) {
+    var el = document.getElementById('cloud-sync-status');
+    if (!el) return;
+    var colors = { ok: '#10b981', syncing: '#f59e0b', error: '#ef4444', idle: '#94a3b8' };
+    var icons = { ok: '✅', syncing: '🔄', error: '❌', idle: '☁️' };
+    el.innerHTML = '<span style="color:' + (colors[status] || colors.idle) + ';font-size:12px;">' +
+      (icons[status] || icons.idle) + ' ' + (text || '') + '</span>';
+  }
+
+  // 添加同步状态提示到页面
+  function injectUI() {
+    var target = document.getElementById('lastSync');
+    if (target && !document.getElementById('cloud-sync-status')) {
+      var div = document.createElement('div');
+      div.id = 'cloud-sync-status';
+      div.style.cssText = 'margin-top:4px;';
+      div.innerHTML = '<span style="color:#94a3b8;font-size:12px;">☁️ 云端同步待激活</span>';
+      target.parentNode.appendChild(div);
+    }
+  }
+
+  return {
+    pullAll: pullAll,
+    pushAll: pushAll,
+    pushUsers: pushUsers,
+    injectUI: injectUI,
+    updateSyncUI: updateSyncUI,
+    isSyncing: function() { return isSyncing; }
+  };
+})();
+
 // ===== 全局状态 =====
 var currentMainTab = 'overview';
 var currentDept = null;
@@ -1502,6 +1747,10 @@ function getUsers() {
 
 function saveUsers(users) {
   localStorage.setItem('yl_system_users', JSON.stringify(users));
+  // 云端同步用户数据
+  if (typeof CloudSync !== 'undefined') {
+    setTimeout(function() { CloudSync.pushUsers(); }, 1000);
+  }
 }
 
 function onLoginUsernameChange() {
@@ -1682,12 +1931,13 @@ function switchAdminTab(tab) {
   var activeBtn = document.querySelector('.admin-nav-item[data-atab="' + tab + '"]');
   if (activeBtn) activeBtn.classList.add('active');
 
-  var titleMap = { users: '👥 用户管理', deadline: '⏰ 填报设置', export: '📤 数据导出', logs: '📝 操作日志', navedit: '🧭 导航编辑' };
+  var titleMap = { users: '👥 用户管理', deadline: '⏰ 填报设置', export: '📤 数据导出', cloudsync: '☁️ 云端同步', logs: '📝 操作日志', navedit: '🧭 导航编辑' };
   document.getElementById('admin-page-title').textContent = titleMap[tab] || tab;
 
   if (tab === 'users') renderAdminUsers();
   else if (tab === 'deadline') renderAdminDeadline();
   else if (tab === 'export') renderAdminExport();
+  else if (tab === 'cloudsync') renderAdminCloudSync();
   else if (tab === 'logs') renderAdminLogs();
   else if (tab === 'navedit') renderAdminNavEdit();
 }
@@ -1933,6 +2183,75 @@ function onExportYearChange() {
   }
   // 重新渲染导出面板
   renderAdminExport();
+}
+
+function renderAdminCloudSync() {
+  var container = document.getElementById('admin-panel-content');
+  var html = '<div class="card" style="margin-bottom:16px;">';
+  html += '<h3 style="font-size:16px;font-weight:700;margin-bottom:12px;">☁️ 云端数据同步</h3>';
+  html += '<p style="font-size:13px;color:#64748b;margin-bottom:16px;">数据通过 GitHub 仓库实现多人共享，所有人的填报数据实时同步到云端。</p>';
+
+  // 当前状态
+  html += '<div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:16px;">';
+  html += '<div style="font-size:13px;color:#475569;margin-bottom:8px;"><b>当前状态</b></div>';
+  html += '<div style="display:flex;gap:16px;flex-wrap:wrap;">';
+  html += '<div style="font-size:12px;color:#64748b;">📁 仓库：zhangwenq888/yinglian-kpi</div>';
+  html += '<div style="font-size:12px;color:#64748b;">🏢 基地：' + escHtml(currentBase) + '</div>';
+  html += '<div style="font-size:12px;color:#64748b;">📅 年份：' + currentYear + '年</div>';
+  html += '</div>';
+  html += '<div id="cloudsync-detail" style="margin-top:12px;font-size:12px;color:#64748b;">点击下方按钮执行同步操作</div>';
+  html += '</div>';
+
+  // 操作按钮
+  html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+  html += '<button class="btn btn-primary" style="padding:12px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="cloudSyncPull()">⬇️ 从云端拉取最新数据</button>';
+  html += '<p style="font-size:12px;color:#94a3b8;text-align:center;">将覆盖本地数据，请确认其他人已有最新提交</p>';
+  html += '<button class="btn" style="padding:12px;font-size:14px;font-weight:700;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="cloudSyncPush()">⬆️ 推送本地数据到云端</button>';
+  html += '<p style="font-size:12px;color:#94a3b8;text-align:center;">将本地最新数据上传，覆盖云端版本</p>';
+  html += '</div>';
+
+  // 说明
+  html += '<div style="margin-top:20px;background:#eff6ff;border-radius:10px;padding:16px;">';
+  html += '<div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:8px;">📌 工作原理</div>';
+  html += '<ul style="font-size:12px;color:#475569;padding-left:20px;line-height:1.8;">';
+  html += '<li>每次保存数据时，系统会在 <b>3秒后</b> 自动同步到 GitHub 云端</li>';
+  html += '<li>每次打开系统时，会自动从云端拉取最新数据</li>';
+  html += '<li>多人同时操作时，<b>后保存的数据会覆盖先保存的</b></li>';
+  html += '<li>如果多人同时编辑同一部门，请注意协调避免数据冲突</li>';
+  html += '<li>如遇同步异常，可手动点击上方按钮强制同步</li>';
+  html += '</ul>';
+  html += '</div>';
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function cloudSyncPull() {
+  var detail = document.getElementById('cloudsync-detail');
+  if (detail) detail.innerHTML = '<span style="color:#f59e0b;">🔄 正在从云端拉取数据...</span>';
+  CloudSync.pullAll().then(function(updated) {
+    if (detail) {
+      if (updated) {
+        detail.innerHTML = '<span style="color:#10b981;">✅ 云端数据已拉取，点击"返回系统"查看更新</span>';
+      } else {
+        detail.innerHTML = '<span style="color:#64748b;">ℹ️ 云端无更新数据</span>';
+      }
+    }
+    // 重新加载当前数据
+    if (updated) {
+      _doInitApp();
+      renderOverview();
+      renderCollectChips();
+    }
+  });
+}
+
+function cloudSyncPush() {
+  var detail = document.getElementById('cloudsync-detail');
+  if (detail) detail.innerHTML = '<span style="color:#f59e0b;">🔄 正在推送到云端...</span>';
+  CloudSync.pushAll().then(function() {
+    if (detail) detail.innerHTML = '<span style="color:#10b981;">✅ 数据已推送到云端</span>';
+  });
 }
 
 function renderAdminExport() {
@@ -2260,6 +2579,26 @@ function init() {
 
 function initApp() {
   console.log('init() called - starting...');
+  // 注入云端同步UI
+  if (typeof CloudSync !== 'undefined') CloudSync.injectUI();
+
+  // 从云端拉取最新数据，然后加载本地数据
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.pullAll().then(function(cloudUpdated) {
+      _doInitApp();
+      if (cloudUpdated) {
+        // 云端有更新数据，需要重新渲染
+        renderOverview();
+        renderCollectChips();
+        renderVersionHistory();
+      }
+    });
+  } else {
+    _doInitApp();
+  }
+}
+
+function _doInitApp() {
   // 加载内嵌数据到 appData
   var keys = Object.keys(EMBEDDED_DATA);
   if (keys.length > 0) {
@@ -2387,6 +2726,14 @@ function saveToLocal() {
     localStorage.setItem(collectKey, JSON.stringify(EMBEDDED_COLLECT));
     // 保存KPI_DEFINITION_DATA的修改
     localStorage.setItem(kpiDefKey, JSON.stringify(KPI_DEFINITION_DATA));
+    // 云端同步（延迟推送，避免频繁请求）
+    if (typeof CloudSync !== 'undefined') {
+      CloudSync.updateSyncUI('idle', '数据已保存本地');
+      if (window._cloudSyncTimer) clearTimeout(window._cloudSyncTimer);
+      window._cloudSyncTimer = setTimeout(function() {
+        CloudSync.pushAll();
+      }, 3000); // 3秒后自动同步到云端
+    }
   } catch(e) { console.warn('save error:', e); }
 }
 
