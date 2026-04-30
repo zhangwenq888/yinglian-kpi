@@ -1514,7 +1514,8 @@ var CloudSync = (function() {
   }
 
   // 写入云端文件
-  function write(key, content, sha) {
+  function write(key, content, sha, retryCount) {
+    retryCount = retryCount || 0;
     var payload = {
       message: 'Sync: ' + key + ' @ ' + new Date().toLocaleString('zh-CN'),
       content: btoa(unescape(encodeURIComponent(JSON.stringify(content)))),
@@ -1526,7 +1527,17 @@ var CloudSync = (function() {
       headers: headers(),
       body: JSON.stringify(payload)
     })
-      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(r) {
+        if (r.status === 409 && retryCount < 3) {
+          // SHA冲突，重新获取最新SHA后重试
+          console.warn('CloudSync 409 conflict for', key, '- retrying (' + (retryCount+1) + '/3)');
+          return read(key).then(function(result) {
+            var newSha = result ? result.sha : null;
+            return write(key, content, newSha, retryCount + 1);
+          });
+        }
+        return r.ok ? r.json() : null;
+      })
       .then(function(data) {
         if (data && data.content && data.content.sha) {
           console.log('CloudSync saved:', key);
