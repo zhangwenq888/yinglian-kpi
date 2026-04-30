@@ -1634,6 +1634,21 @@ var CloudSync = (function() {
     isSyncing = true;
     updateSyncUI('syncing', '正在保存到云端...');
 
+    // 推送前先把appData最新数据保存到localStorage（防止推送旧数据）
+    try {
+      if (typeof syncDetailEditToData === 'function') syncDetailEditToData();
+      if (typeof saveToLocal === 'function') {
+        // 先保存，但不要触发新的推送（清除timer避免递归）
+        if (window._cloudSyncTimer) { clearTimeout(window._cloudSyncTimer); window._cloudSyncTimer = null; }
+      }
+      if (typeof appData !== 'undefined' && appData.departments) {
+        var base2 = currentBase;
+        var year2 = currentYear;
+        var perfKey = 'yl_perf_' + base2 + '_' + year2 + '_v4';
+        localStorage.setItem(perfKey, JSON.stringify(appData));
+      }
+    } catch(e) { console.warn('[CloudSync] pushAll保存本地数据失败:', e); }
+
     return ensureDir().then(function() {
       var base = currentBase;
       var year = currentYear;
@@ -1788,6 +1803,15 @@ var CloudSync = (function() {
       { key: 'logs', localKey: 'yl_system_logs', type: 'logs' }
     ];
 
+    // 先把当前appData + DOM编辑中的数据保存到localStorage，防止被覆盖
+    try {
+      if (typeof syncDetailEditToData === 'function') syncDetailEditToData();
+      if (typeof appData !== 'undefined' && appData.departments) {
+        var perfKey = 'yl_perf_' + base + '_' + year + '_v4';
+        localStorage.setItem(perfKey, JSON.stringify(appData));
+      }
+    } catch(e) { console.warn('[CloudSync] 保存本地数据失败:', e); }
+
     var promises = keys.map(function(item) {
       return read(item.key).then(function(result) {
         if (result && result.data) {
@@ -1835,6 +1859,10 @@ var CloudSync = (function() {
         if (typeof renderCollectChips === 'function') renderCollectChips();
         // 如果当前在查看某个部门详情，也刷新
         if (typeof renderDeptDetail === 'function' && currentDept) renderDeptDetail(currentDept);
+        // 合并后有新数据，需要推送到云端确保云端也有完整数据
+        if (typeof CloudSync !== 'undefined') {
+          setTimeout(function() { CloudSync.pushAll(); }, 2000);
+        }
       } else {
         // 无更新，静默
         lastCloudTime = new Date().toISOString();
