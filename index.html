@@ -1730,8 +1730,28 @@ var CloudSync = (function() {
     }
   }
 
+  // 只拉取用户数据（登录页启动时使用）
+  function pullUsers() {
+    return read('users').then(function(result) {
+      if (result && result.data) {
+        if (!Array.isArray(result.data)) {
+          console.warn('[CloudSync] 云端users数据格式错误（非数组），已跳过');
+          return false;
+        }
+        localStorage.setItem('yl_system_users', JSON.stringify(result.data));
+        console.log('[CloudSync] users数据已从云端拉取');
+        return true;
+      }
+      return false;
+    }).catch(function(e) {
+      console.warn('[CloudSync] pullUsers error:', e);
+      return false;
+    });
+  }
+
   return {
     pullAll: pullAll,
+    pullUsers: pullUsers,
     pushAll: pushAll,
     pushUsers: pushUsers,
     injectUI: injectUI,
@@ -2601,6 +2621,19 @@ function init() {
   // 初始化所有面板年份为默认年份
   syncYearSelectors();
 
+  // 页面加载时先从云端拉取用户数据，确保登录页能识别所有用户
+  if (typeof CloudSync !== 'undefined') {
+    CloudSync.injectUI();
+    CloudSync.pullUsers().then(function() {
+      _initCheckSession();
+    }).catch(function() {
+      _initCheckSession();
+    });
+  } else {
+    _initCheckSession();
+  }
+}
+function _initCheckSession() {
   // 检查登录状态（使用sessionStorage，关闭浏览器后需重新登录）
   var savedUser = sessionStorage.getItem('yl_current_user');
   if (savedUser) {
