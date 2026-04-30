@@ -1557,7 +1557,7 @@ function doLogin() {
   localStorage.setItem('yl_current_base', currentBase);
 
   currentUser = { username: user.username, role: user.role, dept: user.dept || '', displayName: user.displayName, base: user.base || '扬州基地' };
-  localStorage.setItem('yl_current_user', JSON.stringify(currentUser));
+  sessionStorage.setItem('yl_current_user', JSON.stringify(currentUser));
   errorEl.style.display = 'none';
 
   // 记录登录日志
@@ -1569,7 +1569,7 @@ function doLogin() {
 function doLogout() {
   if (currentUser) addLog('logout', currentUser.displayName + '退出系统');
   currentUser = null;
-  localStorage.removeItem('yl_current_user');
+  sessionStorage.removeItem('yl_current_user');
   document.getElementById('app-container').style.display = 'none';
   document.getElementById('panel-admin').style.display = 'none';
   document.getElementById('login-overlay').style.display = 'flex';
@@ -2244,14 +2244,14 @@ function init() {
   var savedDeadline = localStorage.getItem('yl_deadline_day');
   if (savedDeadline) DEADLINE_DAY = parseInt(savedDeadline);
 
-  // 检查登录状态
-  var savedUser = localStorage.getItem('yl_current_user');
+  // 检查登录状态（使用sessionStorage，关闭浏览器后需重新登录）
+  var savedUser = sessionStorage.getItem('yl_current_user');
   if (savedUser) {
     try {
       currentUser = JSON.parse(savedUser);
       showMainApp();
     } catch(e) {
-      localStorage.removeItem('yl_current_user');
+      sessionStorage.removeItem('yl_current_user');
     }
   }
 }
