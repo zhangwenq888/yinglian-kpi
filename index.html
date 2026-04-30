@@ -1760,16 +1760,7 @@ var CloudSync = (function() {
       if (isSyncing) return;
       // 如果页面不可见（切到其他标签页），跳过本次
       if (document.hidden) return;
-      console.log('[CloudSync] 定时自动拉取云端数据...');
-      pullAll().then(function(updated) {
-        if (updated) {
-          console.log('[CloudSync] 检测到云端数据更新，刷新页面');
-          // 重新加载数据并刷新UI
-          if (typeof _doInitApp === 'function') _doInitApp();
-          if (typeof renderOverview === 'function') renderOverview();
-          if (typeof renderCollectChips === 'function') renderCollectChips();
-        }
-      });
+      silentPull();
     }, AUTO_PULL_INTERVAL);
     console.log('[CloudSync] 已启动自动同步（每' + (AUTO_PULL_INTERVAL/1000) + '秒）');
   }
@@ -1779,6 +1770,58 @@ var CloudSync = (function() {
       clearInterval(_autoPullTimer);
       _autoPullTimer = null;
     }
+  }
+
+  // 静默拉取：对比本地数据是否变化，只有变化时才刷新
+  function silentPull() {
+    if (isSyncing) return;
+    isSyncing = true;
+
+    var base = currentBase;
+    var year = currentYear;
+    var keys = [
+      { key: base + '_' + year + '_perf', localKey: 'yl_perf_' + base + '_' + year + '_v4' },
+      { key: base + '_' + year + '_collect', localKey: 'yl_collect_' + base + '_' + year + '_v4' },
+      { key: base + '_' + year + '_kpidef', localKey: 'yl_kpidef_' + base + '_' + year + '_v4' },
+      { key: 'users', localKey: 'yl_system_users' },
+      { key: 'logs', localKey: 'yl_system_logs' }
+    ];
+
+    var promises = keys.map(function(item) {
+      return read(item.key).then(function(result) {
+        if (result && result.data) {
+          if (item.key === 'users' && !Array.isArray(result.data)) return false;
+          var cloudStr = JSON.stringify(result.data);
+          var localStr = localStorage.getItem(item.localKey);
+          if (localStr === cloudStr) return false; // 数据一样，无需更新
+          localStorage.setItem(item.localKey, cloudStr);
+          console.log('[CloudSync] 检测到云端更新:', item.key);
+          return true;
+        }
+        return false;
+      }).catch(function() { return false; });
+    });
+
+    Promise.all(promises).then(function(results) {
+      isSyncing = false;
+      var hasUpdate = results.some(function(r) { return r; });
+      if (hasUpdate) {
+        console.log('[CloudSync] 云端数据有更新，刷新页面显示');
+        updateSyncUI('ok', '检测到云端更新，已自动同步');
+        // 重新加载数据并刷新UI
+        if (typeof _doInitApp === 'function') _doInitApp();
+        if (typeof renderOverview === 'function') renderOverview();
+        if (typeof renderCollectChips === 'function') renderCollectChips();
+        // 如果当前在查看某个部门详情，也刷新
+        if (typeof renderDeptDetail === 'function' && currentDept) renderDeptDetail(currentDept);
+      } else {
+        // 无更新，静默
+        lastCloudTime = new Date().toISOString();
+      }
+    }).catch(function(e) {
+      isSyncing = false;
+      console.warn('[CloudSync] 自动拉取出错:', e);
+    });
   }
 
   return {
