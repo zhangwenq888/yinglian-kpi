@@ -284,13 +284,37 @@ select.year-select{
 
   <!-- 指标管理 -->
   <div id="panel-manage" style="display:none;">
-    <h2 style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:16px;">⚙️ 绩效指标管理</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+      <h2 style="font-size:20px;font-weight:800;color:#1e293b;">⚙️ 绩效指标管理</h2>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="font-size:13px;font-weight:600;color:#374151;">年份：</label>
+        <select id="manage-year-select" onchange="updateYearDisplay()" class="year-select" style="font-size:13px;font-weight:600;color:#1e293b">
+          <option value="2024">2024年</option>
+          <option value="2025">2025年</option>
+          <option value="2026" selected>2026年</option>
+          <option value="2027">2027年</option>
+          <option value="2028">2028年</option>
+        </select>
+      </div>
+    </div>
     <div id="manage-content"></div>
   </div>
 
   <!-- 收集表管理 -->
   <div id="panel-collectmanage" style="display:none;">
-    <h2 style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:16px;">📂 绩效数据收集表管理</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+      <h2 style="font-size:20px;font-weight:800;color:#1e293b;">📂 绩效数据收集表管理</h2>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="font-size:13px;font-weight:600;color:#374151;">年份：</label>
+        <select id="collectmanage-year-select" onchange="updateYearDisplay()" class="year-select" style="font-size:13px;font-weight:600;color:#1e293b">
+          <option value="2024">2024年</option>
+          <option value="2025">2025年</option>
+          <option value="2026" selected>2026年</option>
+          <option value="2027">2027年</option>
+          <option value="2028">2028年</option>
+        </select>
+      </div>
+    </div>
     <div id="collectmanage-content"></div>
   </div>
 
@@ -1902,7 +1926,7 @@ function onExportYearChange() {
     saveToLocal();
     currentYear = newYear;
     // 同步所有年份选择器
-    ['overview-year-select','detail-year-select','collect-year-select','kpi-def-year-select'].forEach(function(id) {
+    ['overview-year-select','detail-year-select','collect-year-select','kpi-def-year-select','manage-year-select','collectmanage-year-select'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.value = newYear;
     });
@@ -2416,10 +2440,10 @@ function switchTab(tab) {
     var btn = document.querySelector('.tab-btn[data-tab="' + t + '"]');
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'manage') renderManageList();
-  else if (tab === 'collectmanage') renderCollectManage();
-  else if (tab === 'detail') initDetailPage();
-  else if (tab === 'kpi-def') { initKpiDefDeptSelect(); renderKpiDefinition(); }
+  if (tab === 'manage') { syncYearSelectors(); renderManageList(); }
+  else if (tab === 'collectmanage') { syncYearSelectors(); renderCollectManage(); }
+  else if (tab === 'detail') { syncYearSelectors(); initDetailPage(); }
+  else if (tab === 'kpi-def') { syncYearSelectors(); initKpiDefDeptSelect(); renderKpiDefinition(); }
   else if (tab === 'monthly') { renderOverviewMonthDetail(); }
 }
 
@@ -4273,9 +4297,18 @@ function saveCollectKpi() {
 
 
 // ===== 年份选择同步函数 =====
+// 辅助函数：同步所有年份选择器为 currentYear（不做数据重载）
+function syncYearSelectors() {
+  var selectors = ['overview-year-select', 'detail-year-select', 'collect-year-select', 'kpi-def-year-select', 'monthly-year-select', 'manage-year-select', 'collectmanage-year-select'];
+  for (var i = 0; i < selectors.length; i++) {
+    var el = document.getElementById(selectors[i]);
+    if (el) el.value = currentYear;
+  }
+}
+
 function updateYearDisplay() {
   // 同步所有年份选择器的值
-  var selectors = ['overview-year-select', 'detail-year-select', 'collect-year-select', 'kpi-def-year-select', 'monthly-year-select'];
+  var selectors = ['overview-year-select', 'detail-year-select', 'collect-year-select', 'kpi-def-year-select', 'monthly-year-select', 'manage-year-select', 'collectmanage-year-select'];
   var sourceId = (event && event.target) ? event.target.id : null;
   var year = currentYear;
   
@@ -4397,6 +4430,14 @@ function loadYearData(year) {
   if (currentDept && document.getElementById('panel-detail') && document.getElementById('panel-detail').style.display !== 'none') {
     initDetailPage();
     renderDetailData();
+  }
+  // 刷新指标管理面板（如果可见）
+  if (document.getElementById('panel-manage') && document.getElementById('panel-manage').style.display !== 'none') {
+    if (typeof renderManageList === 'function') renderManageList();
+  }
+  // 刷新收集表管理面板（如果可见）
+  if (document.getElementById('panel-collectmanage') && document.getElementById('panel-collectmanage').style.display !== 'none') {
+    if (typeof renderCollectManage === 'function') renderCollectManage();
   }
   
   // 提示切换成功
