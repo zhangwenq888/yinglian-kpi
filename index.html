@@ -1785,7 +1785,7 @@ function saveUsers(users) {
   localStorage.setItem('yl_system_users', JSON.stringify(users));
   // 云端同步用户数据
   if (typeof CloudSync !== 'undefined') {
-    setTimeout(function() { CloudSync.pushUsers(); }, 1000);
+    setTimeout(function() { CloudSync.pushUsers(); }, 5000);
   }
 }
 
@@ -2618,16 +2618,21 @@ function initApp() {
   // 注入云端同步UI
   if (typeof CloudSync !== 'undefined') CloudSync.injectUI();
 
-  // 从云端拉取最新数据，然后加载本地数据
+  // 启动时优先从云端拉取最新数据，再渲染页面
   if (typeof CloudSync !== 'undefined') {
+    CloudSync.updateSyncUI('syncing', '正在从云端同步最新数据...');
     CloudSync.pullAll().then(function(cloudUpdated) {
-      _doInitApp();
       if (cloudUpdated) {
-        // 云端有更新数据，需要重新渲染
-        renderOverview();
-        renderCollectChips();
-        renderVersionHistory();
+        console.log('[initApp] 云端数据已拉取，使用最新数据渲染');
+        CloudSync.updateSyncUI('ok', '云端数据已同步');
+      } else {
+        CloudSync.updateSyncUI('idle', '使用本地缓存数据');
       }
+      _doInitApp();
+    }).catch(function(e) {
+      console.warn('[initApp] 云端同步失败，使用本地数据:', e);
+      CloudSync.updateSyncUI('error', '云端同步失败，使用本地数据');
+      _doInitApp();
     });
   } else {
     _doInitApp();
@@ -2768,7 +2773,7 @@ function saveToLocal() {
       if (window._cloudSyncTimer) clearTimeout(window._cloudSyncTimer);
       window._cloudSyncTimer = setTimeout(function() {
         CloudSync.pushAll();
-      }, 3000); // 3秒后自动同步到云端
+      }, 30000); // 30秒后自动同步到云端（防抖，避免高频推送）
     }
   } catch(e) { console.warn('save error:', e); }
 }
