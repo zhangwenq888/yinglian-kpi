@@ -4324,7 +4324,7 @@ var panelYearSelectors = {
   'kpi-def': 'kpi-def-year-select'
 };
 
-// 面板年份切换：只影响当前面板
+// 面板年份切换：只影响当前面板（保存→切换数据→只刷新当前面板）
 function onPanelYearChange(panel) {
   var selId = panelYearSelectors[panel];
   if (!selId) return;
@@ -4332,23 +4332,62 @@ function onPanelYearChange(panel) {
   if (!el) return;
   var newYear = el.value;
   if (newYear === panelYears[panel]) return;
-  panelYears[panel] = newYear;
 
-  // 切换前保存当前编辑
+  // 切换前保存当前编辑和数据
   syncDetailEditToData();
   saveToLocal();
 
-  // 更新全局年份并重新加载
+  // 更新面板年份和全局年份
+  panelYears[panel] = newYear;
   currentYear = newYear;
+
+  // 只加载该年份的数据到全局变量
   loadYearData(newYear);
+
+  // 只刷新当前面板（不刷新其他面板）
+  renderPanel(panel);
 }
 
-// 切换面板时：同步该面板选择器为面板记录的年份，并加载数据
+// 切换面板时：恢复该面板年份，重新加载对应年份数据并刷新该面板
 function activatePanelYear(panel) {
   var selId = panelYearSelectors[panel];
   if (selId) {
     var el = document.getElementById(selId);
     if (el) el.value = panelYears[panel] || currentYear;
+  }
+  // 如果面板年份与全局年份不同，需要重新加载
+  var panelYear = panelYears[panel] || currentYear;
+  if (panelYear !== currentYear) {
+    syncDetailEditToData();
+    saveToLocal();
+    currentYear = panelYear;
+    loadYearData(panelYear);
+  }
+  // 刷新该面板
+  renderPanel(panel);
+}
+
+// 刷新指定面板
+function renderPanel(panel) {
+  switch(panel) {
+    case 'overview': renderOverview(); break;
+    case 'monthly': renderOverviewMonthDetail(); break;
+    case 'detail':
+      if (currentDept) { initDetailPage(); renderDetailData(); }
+      break;
+    case 'collect':
+      if (typeof renderCollectChips === 'function') renderCollectChips();
+      break;
+    case 'manage':
+      if (typeof renderManageList === 'function') renderManageList();
+      break;
+    case 'collectmanage':
+      if (typeof renderCollectManage === 'function') renderCollectManage();
+      break;
+    case 'kpi-def':
+      if (typeof initKpiDefDeptSelect === 'function') initKpiDefDeptSelect();
+      if (typeof renderKpiDefinition === 'function') renderKpiDefinition();
+      break;
   }
 }
 
@@ -4443,36 +4482,7 @@ function loadYearData(year) {
       });
     }
   } catch(e) { console.warn('loadYearData kpiDef error:', e); }
-  
-  // 重新渲染相关面板
-  renderOverview();
-  if (typeof renderCollectChips === 'function') renderCollectChips();
-  if (document.getElementById('kpi-def-dept-select') && document.getElementById('kpi-def-dept-select').value) {
-    renderKpiDefinition();
-  }
-  // 刷新部门详情页（如果可见）
-  if (currentDept && document.getElementById('panel-detail') && document.getElementById('panel-detail').style.display !== 'none') {
-    initDetailPage();
-    renderDetailData();
-  }
-  // 刷新指标管理面板（如果可见）
-  if (document.getElementById('panel-manage') && document.getElementById('panel-manage').style.display !== 'none') {
-    if (typeof renderManageList === 'function') renderManageList();
-  }
-  // 刷新收集表管理面板（如果可见）
-  if (document.getElementById('panel-collectmanage') && document.getElementById('panel-collectmanage').style.display !== 'none') {
-    if (typeof renderCollectManage === 'function') renderCollectManage();
-  }
-  
-  // 提示切换成功
-  var tip = document.createElement('div');
-  tip.style.cssText = 'position:fixed;top:70px;right:24px;background:#1e3a8a;color:white;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2);';
-  tip.textContent = '已切换到 ' + year + ' 年数据';
-  document.body.appendChild(tip);
-  setTimeout(function() { if (tip.parentNode) tip.parentNode.removeChild(tip); }, 2000);
 }
-
-
 
 // ===== 属地管理模块 =====
 function initBaseSelector() {
