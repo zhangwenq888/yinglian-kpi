@@ -1773,6 +1773,7 @@ var CloudSync = (function() {
   }
 
   // 静默拉取：对比本地数据是否变化，只有变化时才刷新
+  // 关键：拉取云端数据后，与本地数据合并（保留本地未推送的修改），而不是直接覆盖
   function silentPull() {
     if (isSyncing) return;
     isSyncing = true;
@@ -1780,11 +1781,11 @@ var CloudSync = (function() {
     var base = currentBase;
     var year = currentYear;
     var keys = [
-      { key: base + '_' + year + '_perf', localKey: 'yl_perf_' + base + '_' + year + '_v4' },
-      { key: base + '_' + year + '_collect', localKey: 'yl_collect_' + base + '_' + year + '_v4' },
-      { key: base + '_' + year + '_kpidef', localKey: 'yl_kpidef_' + base + '_' + year + '_v4' },
-      { key: 'users', localKey: 'yl_system_users' },
-      { key: 'logs', localKey: 'yl_system_logs' }
+      { key: base + '_' + year + '_perf', localKey: 'yl_perf_' + base + '_' + year + '_v4', type: 'perf' },
+      { key: base + '_' + year + '_collect', localKey: 'yl_collect_' + base + '_' + year + '_v4', type: 'collect' },
+      { key: base + '_' + year + '_kpidef', localKey: 'yl_kpidef_' + base + '_' + year + '_v4', type: 'kpidef' },
+      { key: 'users', localKey: 'yl_system_users', type: 'users' },
+      { key: 'logs', localKey: 'yl_system_logs', type: 'logs' }
     ];
 
     var promises = keys.map(function(item) {
@@ -1794,6 +1795,26 @@ var CloudSync = (function() {
           var cloudStr = JSON.stringify(result.data);
           var localStr = localStorage.getItem(item.localKey);
           if (localStr === cloudStr) return false; // 数据一样，无需更新
+          
+          // 对于perf数据：智能合并（保留本地未推送的修改 + 云端其他人修改的数据）
+          if (item.type === 'perf' && localStr) {
+            try {
+              var localData = JSON.parse(localStr);
+              var cloudData = result.data;
+              var merged = mergePerfData(localData, cloudData);
+              var mergedStr = JSON.stringify(merged);
+              if (mergedStr === localStr) return false; // 合并后和本地一样，无需更新
+              localStorage.setItem(item.localKey, mergedStr);
+              console.log('[CloudSync] 检测到云端更新(perf已合并):', item.key);
+              return true;
+            } catch(e) {
+              console.warn('[CloudSync] perf合并失败，直接使用云端数据:', e);
+              localStorage.setItem(item.localKey, cloudStr);
+              return true;
+            }
+          }
+          
+          // 其他数据：直接用云端数据覆盖
           localStorage.setItem(item.localKey, cloudStr);
           console.log('[CloudSync] 检测到云端更新:', item.key);
           return true;
@@ -1822,6 +1843,60 @@ var CloudSync = (function() {
       isSyncing = false;
       console.warn('[CloudSync] 自动拉取出错:', e);
     });
+  }
+
+  // 合并perf数据：以本地为基础，补充云端中本地没有的部门实绩数据
+  // 策略：同一个KPI，如果本地有数据就保留本地的，如果本地没有就取云端的
+  function mergePerfData(localData, cloudData) {
+    var localDepts = localData.departments || {};
+    var cloudDepts = cloudData.departments || {};
+    var merged = JSON.parse(JSON.stringify(localData));
+    var mergedDepts = merged.departments;
+
+    // 遍历云端每个部门
+    Object.keys(cloudDepts).forEach(function(deptName) {
+      if (!mergedDepts[deptName]) {
+        // 本地没有这个部门，直接加入
+        mergedDepts[deptName] = cloudDepts[deptName];
+        return;
+      }
+      // 本地有这个部门，逐个KPI合并
+      var localKpis = mergedDepts[deptName].kpis || [];
+      var cloudKpis = cloudDepts[deptName].kpis || [];
+      cloudKpis.forEach(function(cloudKpi, idx) {
+        // 按KPI名称匹配
+        var localKpi = localKpis.find(function(k) { return k.name === cloudKpi.name; });
+        if (!localKpi) {
+          // 本地没有这个KPI，加入
+          localKpis.push(cloudKpi);
+          return;
+        }
+        // 合并perfs：本地有的月份保留本地，本地没有的月份取云端
+        if (cloudKpi.perfs) {
+          if (!localKpi.perfs) localKpi.perfs = {};
+          Object.keys(cloudKpi.perfs).forEach(function(month) {
+            if (!localKpi.perfs[month]) {
+              localKpi.perfs[month] = cloudKpi.perfs[month];
+            }
+          });
+        }
+        // 合并scores：同上
+        if (cloudKpi.scores) {
+          if (!localKpi.scores) localKpi.scores = {};
+          Object.keys(cloudKpi.scores).forEach(function(month) {
+            if (!localKpi.scores[month]) {
+              localKpi.scores[month] = cloudKpi.scores[month];
+            }
+          });
+        }
+      });
+    });
+
+    // 使用云端更新的lastModified
+    if (cloudData.lastModified) {
+      merged.lastModified = cloudData.lastModified;
+    }
+    return merged;
   }
 
   return {
