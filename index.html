@@ -382,7 +382,7 @@ select.year-select{
 
   <!-- 指标定义 -->
   <div id="panel-kpi-def" style="display:none;">
-    <h2 style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:16px;">📋 <select id="kpi-def-year-select" onchange="renderKpiDefinition()" class="year-select" style="font-size:18px;font-weight:800;color:#1e293b">
+    <h2 style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:16px;">📋 <select id="kpi-def-year-select" onchange="updateYearDisplay()" class="year-select" style="font-size:18px;font-weight:800;color:#1e293b">
         <option value="2024">2024年</option>
         <option value="2025">2025年</option>
         <option value="2026" selected>2026年</option>
@@ -1929,11 +1929,6 @@ function onExportYearChange() {
   if (newYear !== currentYear) {
     saveToLocal();
     currentYear = newYear;
-    // 同步所有年份选择器
-    ['overview-year-select','detail-year-select','collect-year-select','kpi-def-year-select','manage-year-select','collectmanage-year-select'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.value = newYear;
-    });
     loadYearData(newYear);
   }
   // 重新渲染导出面板
@@ -2248,6 +2243,9 @@ function init() {
   var savedDeadline = localStorage.getItem('yl_deadline_day');
   if (savedDeadline) DEADLINE_DAY = parseInt(savedDeadline);
 
+  // 初始化所有面板年份为默认年份
+  syncYearSelectors();
+
   // 检查登录状态（使用sessionStorage，关闭浏览器后需重新登录）
   var savedUser = sessionStorage.getItem('yl_current_user');
   if (savedUser) {
@@ -2444,10 +2442,13 @@ function switchTab(tab) {
     var btn = document.querySelector('.tab-btn[data-tab="' + t + '"]');
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'manage') { syncYearSelectors(); renderManageList(); }
-  else if (tab === 'collectmanage') { syncYearSelectors(); renderCollectManage(); }
-  else if (tab === 'detail') { syncYearSelectors(); initDetailPage(); }
-  else if (tab === 'kpi-def') { syncYearSelectors(); initKpiDefDeptSelect(); renderKpiDefinition(); }
+  if (tab === 'manage') { activatePanelYear('manage'); renderManageList(); }
+  else if (tab === 'collectmanage') { activatePanelYear('collectmanage'); renderCollectManage(); }
+  else if (tab === 'detail') { activatePanelYear('detail'); initDetailPage(); }
+  else if (tab === 'kpi-def') { activatePanelYear('kpi-def'); initKpiDefDeptSelect(); renderKpiDefinition(); }
+  else if (tab === 'overview') { activatePanelYear('overview'); renderOverview(); }
+  else if (tab === 'monthly') { activatePanelYear('monthly'); renderOverviewMonthDetail(); }
+  else if (tab === 'collect') { activatePanelYear('collect'); renderCollectChips(); }
   else if (tab === 'monthly') { renderOverviewMonthDetail(); }
 }
 
@@ -4300,60 +4301,79 @@ function saveCollectKpi() {
 
 
 
-// ===== 年份选择同步函数 =====
-// 辅助函数：同步所有年份选择器为 currentYear（不做数据重载）
-function syncYearSelectors() {
-  var selectors = ['overview-year-select', 'detail-year-select', 'collect-year-select', 'kpi-def-year-select', 'monthly-year-select', 'manage-year-select', 'collectmanage-year-select'];
-  for (var i = 0; i < selectors.length; i++) {
-    var el = document.getElementById(selectors[i]);
-    if (el) el.value = currentYear;
+// ===== 年份选择（各面板独立） =====
+// 各面板维护自己的年份，互不影响
+var panelYears = {
+  overview: '2026',
+  monthly: '2026',
+  detail: '2026',
+  collect: '2026',
+  manage: '2026',
+  collectmanage: '2026',
+  'kpi-def': '2026'
+};
+
+// 各面板选择器ID映射
+var panelYearSelectors = {
+  overview: 'overview-year-select',
+  monthly: 'monthly-year-select',
+  detail: 'detail-year-select',
+  collect: 'collect-year-select',
+  manage: 'manage-year-select',
+  collectmanage: 'collectmanage-year-select',
+  'kpi-def': 'kpi-def-year-select'
+};
+
+// 面板年份切换：只影响当前面板
+function onPanelYearChange(panel) {
+  var selId = panelYearSelectors[panel];
+  if (!selId) return;
+  var el = document.getElementById(selId);
+  if (!el) return;
+  var newYear = el.value;
+  if (newYear === panelYears[panel]) return;
+  panelYears[panel] = newYear;
+
+  // 切换前保存当前编辑
+  syncDetailEditToData();
+  saveToLocal();
+
+  // 更新全局年份并重新加载
+  currentYear = newYear;
+  loadYearData(newYear);
+}
+
+// 切换面板时：同步该面板选择器为面板记录的年份，并加载数据
+function activatePanelYear(panel) {
+  var selId = panelYearSelectors[panel];
+  if (selId) {
+    var el = document.getElementById(selId);
+    if (el) el.value = panelYears[panel] || currentYear;
   }
 }
 
+// 获取指定面板的当前年份
+function getPanelYear(panel) {
+  return panelYears[panel] || currentYear;
+}
+
+// 初始化所有面板年份为 currentYear
+function syncYearSelectors() {
+  Object.keys(panelYearSelectors).forEach(function(panel) {
+    panelYears[panel] = currentYear;
+  });
+}
+
 function updateYearDisplay() {
-  // 同步所有年份选择器的值
-  var selectors = ['overview-year-select', 'detail-year-select', 'collect-year-select', 'kpi-def-year-select', 'monthly-year-select', 'manage-year-select', 'collectmanage-year-select'];
+  // 兼容旧调用：根据 event.target.id 找到对应面板并切换
   var sourceId = (event && event.target) ? event.target.id : null;
-  var year = currentYear;
-  
-  for (var i = 0; i < selectors.length; i++) {
-    var el = document.getElementById(selectors[i]);
-    if (el) {
-      if (sourceId === selectors[i]) {
-        year = el.value;
-        break;
-      }
+  if (!sourceId) return;
+  // 反查面板名
+  Object.keys(panelYearSelectors).forEach(function(panel) {
+    if (panelYearSelectors[panel] === sourceId) {
+      onPanelYearChange(panel);
     }
-  }
-  
-  if (year === currentYear) {
-    // 年份未变，只同步选择器
-    for (var i = 0; i < selectors.length; i++) {
-      var el = document.getElementById(selectors[i]);
-      if (el) el.value = year;
-    }
-    return;
-  }
-  
-  // 年份有变化，先保存当前年份数据
-  syncDetailEditToData();
-  saveToLocal();
-  
-  // 更新全局年份
-  currentYear = year;
-  
-  // 更新所有选择器
-  for (var i = 0; i < selectors.length; i++) {
-    var el = document.getElementById(selectors[i]);
-    if (el) el.value = year;
-  }
-  
-  // 更新页面显示的年份相关文字
-  var yearTexts = document.querySelectorAll('.year-display');
-  yearTexts.forEach(function(el) { el.textContent = year; });
-  
-  // 重新加载对应年份的数据
-  loadYearData(year);
+  });
 }
 
 // 切换年份时重新加载数据
